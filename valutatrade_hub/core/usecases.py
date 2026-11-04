@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from valutatrade_hub.core.exceptions import RateUnavailableError
+from valutatrade_hub.core.currencies import get_currency
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    InsufficientFundsError,
+    RateUnavailableError,
+)
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import load_json, save_json
 
@@ -108,6 +113,7 @@ def buy_currency(currency_code: str, amount: float) -> dict:
     currency = currency_code.strip().upper()
     if not currency:
         raise ValueError("Код валюты не может быть пустым.")
+    get_currency(currency)
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
         raise ValueError("'amount' должен быть положительным числом")
     portfolio = _load_portfolio(user.user_id)
@@ -139,6 +145,7 @@ def sell_currency(currency_code: str, amount: float) -> dict:
     currency = currency_code.strip().upper()
     if not currency:
         raise ValueError("Код валюты не может быть пустым.")
+    get_currency(currency)
     if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
         raise ValueError("'amount' должен быть положительным числом")
     portfolio = _load_portfolio(user.user_id)
@@ -149,10 +156,7 @@ def sell_currency(currency_code: str, amount: float) -> dict:
         )
     wallet = portfolio.get_wallet(currency)
     if amount > wallet.balance:
-        raise ValueError(
-            f"Недостаточно средств: доступно {wallet.balance:.4f} {currency}, "
-            f"требуется {amount:.4f} {currency}"
-        )
+        raise InsufficientFundsError(available=wallet.balance, required=amount, code=currency)
     try:
         rate, _ = get_rate(currency, "USD")
     except RateUnavailableError:
@@ -208,10 +212,12 @@ def get_rate(from_currency: str, to_currency: str) -> tuple[float, datetime]:
         raise ValueError("Код валюты не может быть пустым.")
     if from_cur == to_cur:
         return 1.0, datetime.now()
+    get_currency(from_cur)
+    get_currency(to_cur)
     try:
         usd_per_from, ts_from = _get_usd_rate(from_cur)
         usd_per_to, ts_to = _get_usd_rate(to_cur)
-    except RateUnavailableError:
+    except ApiRequestError:
         raise RateUnavailableError(
             f"Курс {from_cur}→{to_cur} недоступен. Повторите попытку позже."
         ) from None
@@ -234,7 +240,7 @@ def _fetch_rate_stub(currency: str) -> float:
     """Return a fixed USD rate for the currency (stub until the parser service exists)."""
     rates = Portfolio.exchange_rates
     if currency not in rates:
-        raise RateUnavailableError(f"Нет курса для валюты {currency}")
+        raise ApiRequestError(f"нет данных для валюты {currency} в источнике")
     return rates[currency]
 
 

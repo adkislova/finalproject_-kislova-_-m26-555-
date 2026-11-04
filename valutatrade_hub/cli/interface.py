@@ -5,6 +5,12 @@ import shlex
 import sys
 
 from valutatrade_hub.core import usecases
+from valutatrade_hub.core.currencies import get_supported_codes
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 
 
 def main() -> None:
@@ -72,6 +78,14 @@ def _run_command(parser: argparse.ArgumentParser, argv: list[str]) -> None:
         return
     try:
         args.func(args)
+    except InsufficientFundsError as exc:
+        print(exc)
+    except CurrencyNotFoundError as exc:
+        print(exc)
+        print(f"Поддерживаемые коды: {', '.join(get_supported_codes())}")
+    except ApiRequestError as exc:
+        print(exc)
+        print("Повторите попытку позже или проверьте подключение к сети.")
     except usecases.RateUnavailableError as exc:
         print(exc)
     except (ValueError, TypeError) as exc:

@@ -75,10 +75,13 @@ _CURRENCIES: dict[str, Currency] = {
 
 def get_currency(code: str) -> Currency:
     """Return the currency for the code (case-insensitive) or raise CurrencyNotFoundError."""
-    if not isinstance(code, str) or not code.strip():
-        raise CurrencyNotFoundError(f"Валюта '{code}' не найдена")
-    key = code.strip().upper()
+    key = code.strip().upper() if isinstance(code, str) else ""
     try:
         return _CURRENCIES[key]
     except KeyError:
-        raise CurrencyNotFoundError(f"Валюта '{code}' не найдена") from None
+        raise CurrencyNotFoundError(code) from None
+
+
+def get_supported_codes() -> list[str]:
+    """Return the sorted list of supported currency codes."""
+    return sorted(_CURRENCIES)
