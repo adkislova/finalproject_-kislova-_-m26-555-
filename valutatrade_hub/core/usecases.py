@@ -57,6 +57,11 @@ def login_user(username: str, password: str) -> User:
     return user
 
 
+def logout_user() -> None:
+    """Clear the current session."""
+    db.save("session.json", {})
+
+
 def get_current_user() -> User | None:
     """Return the user from the current session, or None if not logged in."""
     session = db.load("session.json", None)
@@ -199,6 +204,7 @@ def sell_currency(currency_code: str, amount: float) -> dict:
         "rate": rate,
         "base": "USD",
         "usd_amount": proceeds,
+        "usd_balance": usd_wallet.balance,
     }
 
 
