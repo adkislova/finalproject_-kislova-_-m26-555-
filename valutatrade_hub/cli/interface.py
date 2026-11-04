@@ -4,23 +4,28 @@ import argparse
 import shlex
 import sys
 
+from prettytable import PrettyTable
+
 from valutatrade_hub.core import usecases
-from valutatrade_hub.core.currencies import get_supported_codes
+from valutatrade_hub.core.currencies import get_currency, get_supported_codes
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
     CurrencyNotFoundError,
     InsufficientFundsError,
 )
+from valutatrade_hub.logging_config import setup_logging
 
 
 def main() -> None:
     """Run a single command from argv or start the interactive command loop."""
+    setup_logging()
     parser = _build_parser()
     if len(sys.argv) > 1:
         _run_command(parser, sys.argv[1:])
         return
     print("ValutaTrade Hub — консольный валютный кошелёк")
-    print("Команды: register, login, show-portfolio, buy, sell, get-rate, exit")
+    print("Команды: register, login, logout, show-portfolio, buy, sell, get-rate,")
+    print("         currencies, help, exit")
     while True:
         try:
             line = input("> ")
@@ -67,6 +72,15 @@ def _build_parser() -> argparse.ArgumentParser:
     rate.add_argument("--from", dest="from_currency", required=True)
     rate.add_argument("--to", dest="to_currency", required=True)
     rate.set_defaults(func=_cmd_get_rate)
+
+    logout = sub.add_parser("logout", help="выйти из сессии")
+    logout.set_defaults(func=_cmd_logout)
+
+    currencies = sub.add_parser("currencies", help="список поддерживаемых валют")
+    currencies.set_defaults(func=_cmd_currencies)
+
+    help_cmd = sub.add_parser("help", help="список команд с аргументами")
+    help_cmd.set_defaults(func=_cmd_help)
     return parser
 
 
@@ -103,6 +117,32 @@ def _cmd_register(args: argparse.Namespace) -> None:
 def _cmd_login(args: argparse.Namespace) -> None:
     user = usecases.login_user(args.username, args.password)
     print(f"Вы вошли как '{user.username}'")
+
+
+def _cmd_logout(args: argparse.Namespace) -> None:
+    usecases.logout_user()
+    print("Вы вышли из аккаунта")
+
+
+def _cmd_currencies(args: argparse.Namespace) -> None:
+    table = PrettyTable()
+    table.field_names = ["Код", "Информация"]
+    for code in get_supported_codes():
+        table.add_row([code, get_currency(code).get_display_info()])
+    print(table)
+
+
+def _cmd_help(args: argparse.Namespace) -> None:
+    print("Доступные команды:")
+    print("  register --username <str> --password <str>   регистрация")
+    print("  login --username <str> --password <str>      вход")
+    print("  logout                                       выход из сессии")
+    print("  show-portfolio [--base <str>]                портфель и балансы")
+    print("  buy --currency <str> --amount <float>        купить валюту")
+    print("  sell --currency <str> --amount <float>       продать валюту")
+    print("  get-rate --from <str> --to <str>             курс валюты")
+    print("  currencies                                   поддерживаемые валюты")
+    print("  exit                                         выход")
 
 
 def _cmd_show_portfolio(args: argparse.Namespace) -> None:
@@ -143,6 +183,7 @@ def _cmd_sell(args: argparse.Namespace) -> None:
         f"- {data['currency']}: было {_fmt_balance(data['currency'], data['old_balance'])} "
         f"→ стало {_fmt_balance(data['currency'], data['new_balance'])}"
     )
+    print(f"- USD: зачислено {data['usd_amount']:,.2f} (баланс {data['usd_balance']:,.2f})")
     print(f"Оценочная выручка: {data['usd_amount']:,.2f} USD")
 
 

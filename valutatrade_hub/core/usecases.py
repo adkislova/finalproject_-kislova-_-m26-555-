@@ -9,6 +9,7 @@ from valutatrade_hub.core.exceptions import (
     RateUnavailableError,
 )
 from valutatrade_hub.core.models import Portfolio, User, Wallet
+from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.infra.settings import SettingsLoader
 
@@ -18,30 +19,32 @@ db = DatabaseManager()
 CRYPTO_CURRENCIES = {"BTC", "ETH"}
 
 
+@log_action("REGISTER")
 def register_user(username: str, password: str) -> User:
     """Register a new user and create an empty portfolio for them."""
     username = username.strip()
-    users = db.load("users.json", [])
-    if any(u["username"] == username for u in users):
-        raise ValueError(f"Имя пользователя '{username}' уже занято")
-    user_id = max((u["user_id"] for u in users), default=0) + 1
-    user = User.create_new(user_id, username, password)
-    users.append(
-        {
-            "user_id": user.user_id,
-            "username": user.username,
-            "hashed_password": user.hashed_password,
-            "salt": user.salt,
-            "registration_date": user.registration_date.isoformat(),
-        }
+    created: User | None = None
+
+    def add_user(users: list) -> list:
+        nonlocal created
+        if any(u["username"] == username for u in users):
+            raise ValueError(f"Имя пользователя '{username}' уже занято")
+        user_id = max((u["user_id"] for u in users), default=0) + 1
+        created = User.create_new(user_id, username, password)
+        users.append(_user_to_dict(created))
+        return users
+
+    db.update("users.json", [], add_user)
+    assert created is not None
+    db.update(
+        "portfolios.json",
+        [],
+        lambda portfolios: [*portfolios, {"user_id": created.user_id, "wallets": {}}],
     )
-    db.save("users.json", users)
-    portfolios = db.load("portfolios.json", [])
-    portfolios.append({"user_id": user.user_id, "wallets": {}})
-    db.save("portfolios.json", portfolios)
-    return user
+    return created
 
 
+@log_action("LOGIN")
 def login_user(username: str, password: str) -> User:
     """Check the credentials and store the session for the user."""
     raw = next((u for u in db.load("users.json", []) if u["username"] == username), None)
@@ -52,6 +55,11 @@ def login_user(username: str, password: str) -> User:
         raise ValueError("Неверный пароль")
     db.save("session.json", {"user_id": user.user_id, "username": user.username})
     return user
+
+
+def logout_user() -> None:
+    """Clear the current session."""
+    db.save("session.json", {})
 
 
 def get_current_user() -> User | None:
@@ -75,6 +83,17 @@ def _user_from_dict(raw: dict) -> User:
         salt=raw["salt"],
         registration_date=datetime.fromisoformat(raw["registration_date"]),
     )
+
+
+def _user_to_dict(user: User) -> dict:
+    """Convert a User object to a users.json entry."""
+    return {
+        "user_id": user.user_id,
+        "username": user.username,
+        "hashed_password": user.hashed_password,
+        "salt": user.salt,
+        "registration_date": user.registration_date.isoformat(),
+    }
 
 
 def _require_user() -> User:
@@ -110,6 +129,7 @@ def show_portfolio(base_currency: str | None = None) -> dict:
     }
 
 
+@log_action("BUY", verbose=True)
 def buy_currency(currency_code: str, amount: float) -> dict:
     """Buy amount of the currency for the logged-in user (wallet is created on demand)."""
     user = _require_user()
@@ -133,15 +153,18 @@ def buy_currency(currency_code: str, amount: float) -> dict:
     wallet.deposit(amount)
     _save_portfolio(portfolio)
     return {
+        "username": user.username,
         "currency": currency,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": wallet.balance,
         "rate": rate,
+        "base": "USD",
         "usd_amount": round(amount * rate, 2),
     }
 
 
+@log_action("SELL", verbose=True)
 def sell_currency(currency_code: str, amount: float) -> dict:
     """Sell amount of the currency for the logged-in user and credit USD proceeds."""
     user = _require_user()
@@ -173,12 +196,15 @@ def sell_currency(currency_code: str, amount: float) -> dict:
     usd_wallet.deposit(proceeds)
     _save_portfolio(portfolio)
     return {
+        "username": user.username,
         "currency": currency,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": wallet.balance,
         "rate": rate,
+        "base": "USD",
         "usd_amount": proceeds,
+        "usd_balance": usd_wallet.balance,
     }
 
 
@@ -193,18 +219,21 @@ def _load_portfolio(user_id: int) -> Portfolio:
 
 def _save_portfolio(portfolio: Portfolio) -> None:
     """Insert or replace the portfolio in portfolios.json."""
-    portfolios = db.load("portfolios.json", [])
     entry = {
         "user_id": portfolio.user_id,
         "wallets": {code: {"balance": w.balance} for code, w in portfolio.wallets.items()},
     }
-    for i, item in enumerate(portfolios):
-        if item["user_id"] == portfolio.user_id:
-            portfolios[i] = entry
-            break
-    else:
-        portfolios.append(entry)
-    db.save("portfolios.json", portfolios)
+
+    def replace_or_add(portfolios: list) -> list:
+        for i, item in enumerate(portfolios):
+            if item["user_id"] == portfolio.user_id:
+                portfolios[i] = entry
+                break
+        else:
+            portfolios.append(entry)
+        return portfolios
+
+    db.update("portfolios.json", [], replace_or_add)
 
 
 def get_rate(from_currency: str, to_currency: str) -> tuple[float, datetime]:
@@ -249,12 +278,15 @@ def _fetch_rate_stub(currency: str) -> float:
 
 def _update_rate_cache(currency: str, rate: float) -> None:
     """Store the fetched rate in rates.json as if it came from the parser service."""
-    now = datetime.now()
-    data = db.load("rates.json", {})
-    data[f"{currency}_USD"] = {"rate": rate, "updated_at": now.isoformat(timespec="seconds")}
-    data["source"] = "ParserService"
-    data["last_refresh"] = now.isoformat(timespec="seconds")
-    db.save("rates.json", data)
+    updated_at = datetime.now().isoformat(timespec="seconds")
+
+    def add_rate(data: dict) -> dict:
+        data[f"{currency}_USD"] = {"rate": rate, "updated_at": updated_at}
+        data["source"] = "ParserService"
+        data["last_refresh"] = updated_at
+        return data
+
+    db.update("rates.json", {}, add_rate)
 
 
 def _is_fresh(entry: dict) -> bool:
