@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+from valutatrade_hub.core.exceptions import RateUnavailableError
 from valutatrade_hub.core.models import Portfolio, User, Wallet
 from valutatrade_hub.core.utils import load_json, save_json
 
 RATE_TTL_SECONDS = 300
 CRYPTO_CURRENCIES = {"BTC", "ETH"}
-class RateUnavailableError(Exception):
-    """Raised when a currency rate cannot be resolved from cache or the stub."""
 
 
 def register_user(username: str, password: str) -> User:
@@ -76,7 +75,6 @@ def _require_user() -> User:
     if user is None:
         raise ValueError("Сначала выполните login")
     return user
-
 
 
 def show_portfolio(base_currency: str = "USD") -> dict:
