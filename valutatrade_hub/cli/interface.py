@@ -50,7 +50,7 @@ def _build_parser() -> argparse.ArgumentParser:
     login.set_defaults(func=_cmd_login)
 
     show = sub.add_parser("show-portfolio", help="показать портфель и балансы")
-    show.add_argument("--base", default="USD")
+    show.add_argument("--base", default=None)
     show.set_defaults(func=_cmd_show_portfolio)
 
     buy = sub.add_parser("buy", help="купить валюту")
