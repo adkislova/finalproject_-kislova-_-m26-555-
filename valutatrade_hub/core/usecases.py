@@ -309,3 +309,12 @@ def _is_fresh(entry: dict) -> bool:
     now = datetime.now(UTC).replace(tzinfo=None)
     ttl = int(settings.get("rates_ttl_seconds", 300))
     return now - updated < timedelta(seconds=ttl)
+
+
+def get_cached_rates() -> dict:
+    """Return the cached rates snapshot with pairs and last_refresh (possibly empty)."""
+    data = db.load("rates.json", {})
+    if "pairs" in data:
+        return data
+    pairs = {key: value for key, value in data.items() if isinstance(value, dict)}
+    return {"pairs": pairs, "last_refresh": data.get("last_refresh", "")}

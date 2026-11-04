@@ -25,7 +25,7 @@ def main() -> None:
         _run_command(parser, sys.argv[1:])
         return
     print("ValutaTrade Hub — консольный валютный кошелёк")
-    print("Команды: register, login, logout, show-portfolio, buy, sell, get-rate,")
+    print("Команды: register, login, logout, show-portfolio, show-rates, buy, sell, get-rate,")
     print("         currencies, update-rates, help, exit")
     while True:
         try:
@@ -84,7 +84,14 @@ def _build_parser() -> argparse.ArgumentParser:
     help_cmd.set_defaults(func=_cmd_help)
 
     update_rates = sub.add_parser("update-rates", help="обновить курсы через Parser Service")
+    update_rates.add_argument("--source", default=None)
     update_rates.set_defaults(func=_cmd_update_rates)
+
+    show_rates = sub.add_parser("show-rates", help="показать курсы из локального кеша")
+    show_rates.add_argument("--currency", default=None)
+    show_rates.add_argument("--top", type=int, default=None)
+    show_rates.add_argument("--base", default=None)
+    show_rates.set_defaults(func=_cmd_show_rates)
     return parser
 
 
@@ -146,7 +153,8 @@ def _cmd_help(args: argparse.Namespace) -> None:
     print("  sell --currency <str> --amount <float>       продать валюту")
     print("  get-rate --from <str> --to <str>             курс валюты")
     print("  currencies                                   поддерживаемые валюты")
-    print("  update-rates                                 обновить курсы из API")
+    print("  show-rates [--currency] [--top <int>] [--base <str>]   курсы из кеша")
+    print("  update-rates [--source <str>]                обновить курсы из API")
     print("  exit                                         выход")
 
 
@@ -203,6 +211,62 @@ def _cmd_get_rate(args: argparse.Namespace) -> None:
 def _cmd_update_rates(args: argparse.Namespace) -> None:
     updated = RatesUpdater().run_update()
     print(f"Курсы обновлены: {len(updated)} пар. Подробности в logs/app.log")
+
+
+def _cmd_update_rates(args: argparse.Namespace) -> None:
+    result = RatesUpdater(source_filter=args.source).run_update()
+    if result["failed_sources"]:
+        print(
+            f"Обновление завершено с ошибками ({', '.join(result['failed_sources'])}). "
+            "Подробности в logs/app.log"
+        )
+    print(
+        f"Обновление успешно: курсов обновлено: {len(result['rates'])}. "
+        f"Последнее обновление: {result['last_refresh']}"
+    )
+
+
+def _cmd_show_rates(args: argparse.Namespace) -> None:
+    data = usecases.get_cached_rates()
+    pairs = data.get("pairs", {})
+    if not pairs:
+        print("Локальный кеш курсов пуст. Выполните 'update-rates', чтобы загрузить данные.")
+        return
+    rows: list[tuple[str, float, str]] = []
+    base = (args.base or "").strip().upper()
+    if base:
+        base_entry = pairs.get(f"{base}_USD")
+        if base_entry is None:
+            print(f"Нет курса для базовой валюты '{base}' в кеше.")
+            return
+        usd_per_base = float(base_entry["rate"])
+        for pair, entry in pairs.items():
+            code = pair.split("_")[0]
+            if code != base:
+                rows.append(
+                    (f"{code}_{base}", float(entry["rate"]) / usd_per_base, entry["updated_at"])
+                )
+    else:
+        rows = [(pair, float(entry["rate"]), entry["updated_at"]) for pair, entry in pairs.items()]
+    if args.currency:
+        wanted = args.currency.strip().upper()
+        rows = [row for row in rows if row[0].split("_")[0] == wanted]
+        if not rows:
+            print(f"Курс для '{wanted}' не найден в кеше.")
+            return
+    if args.top is not None:
+        if args.top <= 0:
+            print("Значение --top должно быть положительным числом.")
+            return
+        rows = sorted(rows, key=lambda row: row[1], reverse=True)[: args.top]
+    else:
+        rows = sorted(rows, key=lambda row: row[0])
+    table = PrettyTable()
+    table.field_names = ["Пара", "Курс", "Обновлено"]
+    for pair, rate, updated in rows:
+        table.add_row([pair, _fmt_rate(rate), updated])
+    print(f"Курсы из кеша (обновлено: {data.get('last_refresh') or '—'}):")
+    print(table)
 
 
 def _fmt_balance(currency_code: str, value: float) -> str:
