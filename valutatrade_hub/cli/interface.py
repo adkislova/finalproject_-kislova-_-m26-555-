@@ -14,6 +14,7 @@ from valutatrade_hub.core.exceptions import (
     InsufficientFundsError,
 )
 from valutatrade_hub.logging_config import setup_logging
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 
 def main() -> None:
@@ -25,7 +26,7 @@ def main() -> None:
         return
     print("ValutaTrade Hub — консольный валютный кошелёк")
     print("Команды: register, login, logout, show-portfolio, buy, sell, get-rate,")
-    print("         currencies, help, exit")
+    print("         currencies, update-rates, help, exit")
     while True:
         try:
             line = input("> ")
@@ -81,6 +82,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     help_cmd = sub.add_parser("help", help="список команд с аргументами")
     help_cmd.set_defaults(func=_cmd_help)
+
+    update_rates = sub.add_parser("update-rates", help="обновить курсы через Parser Service")
+    update_rates.set_defaults(func=_cmd_update_rates)
     return parser
 
 
@@ -142,6 +146,7 @@ def _cmd_help(args: argparse.Namespace) -> None:
     print("  sell --currency <str> --amount <float>       продать валюту")
     print("  get-rate --from <str> --to <str>             курс валюты")
     print("  currencies                                   поддерживаемые валюты")
+    print("  update-rates                                 обновить курсы из API")
     print("  exit                                         выход")
 
 
@@ -193,6 +198,11 @@ def _cmd_get_rate(args: argparse.Namespace) -> None:
     rate, updated = usecases.get_rate(from_cur, to_cur)
     print(f"Курс {from_cur}→{to_cur}: {_fmt_rate(rate)} (обновлено: {updated:%Y-%m-%d %H:%M:%S})")
     print(f"Обратный курс {to_cur}→{from_cur}: {_fmt_rate(1 / rate)}")
+
+
+def _cmd_update_rates(args: argparse.Namespace) -> None:
+    updated = RatesUpdater().run_update()
+    print(f"Курсы обновлены: {len(updated)} пар. Подробности в logs/app.log")
 
 
 def _fmt_balance(currency_code: str, value: float) -> str:
