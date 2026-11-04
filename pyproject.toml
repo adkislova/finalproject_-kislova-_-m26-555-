@@ -34,3 +34,11 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "W", "F", "I", "N", "UP", "B"]
+
+[tool.valutatrade]
+data_dir = "data"
+rates_ttl_seconds = 300
+base_currency = "USD"
+log_file = "logs/app.log"
+log_level = "INFO"
+log_format = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
