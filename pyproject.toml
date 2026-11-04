@@ -1,0 +1,36 @@
+[project]
+name = "valutatrade-hub"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "nastayirshenko", email = "nastayirshenko@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "prettytable>=3.18.0",
+]
+
+[project.scripts]
+valutatrade-hub = "valutatrade_hub.cli.interface:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+# The package lives at the project root (flat layout), not in src/
+[tool.uv.build-backend]
+module-root = ""
+
+[dependency-groups]
+dev = [
+    "ruff>=0.17.3",
+]
+
+# Static analysis and formatting (PEP8)
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B"]
