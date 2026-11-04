@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from valutatrade_hub.core.currencies import get_currency
 from valutatrade_hub.core.exceptions import (
@@ -260,12 +260,14 @@ def _get_usd_rate(currency: str) -> tuple[float, datetime]:
     """Return how many USD one unit of the currency costs, using cache or the stub."""
     if currency == "USD":
         return 1.0, datetime.min
-    entry = db.load("rates.json", {}).get(f"{currency}_USD")
+    data = db.load("rates.json", {})
+    pairs = data.get("pairs") or data
+    entry = pairs.get(f"{currency}_USD")
     if entry and _is_fresh(entry):
-        return float(entry["rate"]), datetime.fromisoformat(entry["updated_at"])
+        return float(entry["rate"]), _parse_updated_at(entry["updated_at"])
     rate = _fetch_rate_stub(currency)
     _update_rate_cache(currency, rate)
-    return rate, datetime.now()
+    return rate, datetime.now(UTC).replace(tzinfo=None)
 
 
 def _fetch_rate_stub(currency: str) -> float:
@@ -278,19 +280,32 @@ def _fetch_rate_stub(currency: str) -> float:
 
 def _update_rate_cache(currency: str, rate: float) -> None:
     """Store the fetched rate in rates.json as if it came from the parser service."""
-    updated_at = datetime.now().isoformat(timespec="seconds")
+    updated_at = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
     def add_rate(data: dict) -> dict:
-        data[f"{currency}_USD"] = {"rate": rate, "updated_at": updated_at}
-        data["source"] = "ParserService"
+        pairs = data.setdefault("pairs", {})
+        pairs[f"{currency}_USD"] = {
+            "rate": rate,
+            "updated_at": updated_at,
+            "source": "ParserService",
+        }
         data["last_refresh"] = updated_at
         return data
 
     db.update("rates.json", {}, add_rate)
 
 
+def _parse_updated_at(value: str) -> datetime:
+    """Parse a rate timestamp into a naive UTC datetime for comparisons."""
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        return parsed.astimezone(UTC).replace(tzinfo=None)
+    return parsed
+
+
 def _is_fresh(entry: dict) -> bool:
     """Check that the cached rate is newer than the configured TTL."""
-    updated = datetime.fromisoformat(entry["updated_at"])
+    updated = _parse_updated_at(entry["updated_at"])
+    now = datetime.now(UTC).replace(tzinfo=None)
     ttl = int(settings.get("rates_ttl_seconds", 300))
-    return datetime.now() - updated < timedelta(seconds=ttl)
+    return now - updated < timedelta(seconds=ttl)

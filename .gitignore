@@ -21,3 +21,6 @@ data/session.json
 
 # Application logs
 logs/
+
+# API keys
+.env
