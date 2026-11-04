@@ -9,6 +9,7 @@ from valutatrade_hub.core.exceptions import (
     RateUnavailableError,
 )
 from valutatrade_hub.core.models import Portfolio, User, Wallet
+from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.database import DatabaseManager
 from valutatrade_hub.infra.settings import SettingsLoader
 
@@ -18,6 +19,7 @@ db = DatabaseManager()
 CRYPTO_CURRENCIES = {"BTC", "ETH"}
 
 
+@log_action("REGISTER")
 def register_user(username: str, password: str) -> User:
     """Register a new user and create an empty portfolio for them."""
     username = username.strip()
@@ -42,6 +44,7 @@ def register_user(username: str, password: str) -> User:
     return user
 
 
+@log_action("LOGIN")
 def login_user(username: str, password: str) -> User:
     """Check the credentials and store the session for the user."""
     raw = next((u for u in db.load("users.json", []) if u["username"] == username), None)
@@ -110,6 +113,7 @@ def show_portfolio(base_currency: str | None = None) -> dict:
     }
 
 
+@log_action("BUY", verbose=True)
 def buy_currency(currency_code: str, amount: float) -> dict:
     """Buy amount of the currency for the logged-in user (wallet is created on demand)."""
     user = _require_user()
@@ -133,15 +137,18 @@ def buy_currency(currency_code: str, amount: float) -> dict:
     wallet.deposit(amount)
     _save_portfolio(portfolio)
     return {
+        "username": user.username,
         "currency": currency,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": wallet.balance,
         "rate": rate,
+        "base": "USD",
         "usd_amount": round(amount * rate, 2),
     }
 
 
+@log_action("SELL", verbose=True)
 def sell_currency(currency_code: str, amount: float) -> dict:
     """Sell amount of the currency for the logged-in user and credit USD proceeds."""
     user = _require_user()
@@ -173,11 +180,13 @@ def sell_currency(currency_code: str, amount: float) -> dict:
     usd_wallet.deposit(proceeds)
     _save_portfolio(portfolio)
     return {
+        "username": user.username,
         "currency": currency,
         "amount": amount,
         "old_balance": old_balance,
         "new_balance": wallet.balance,
         "rate": rate,
+        "base": "USD",
         "usd_amount": proceeds,
     }
 

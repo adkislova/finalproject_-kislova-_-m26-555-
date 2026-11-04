@@ -11,10 +11,12 @@ from valutatrade_hub.core.exceptions import (
     CurrencyNotFoundError,
     InsufficientFundsError,
 )
+from valutatrade_hub.logging_config import setup_logging
 
 
 def main() -> None:
     """Run a single command from argv or start the interactive command loop."""
+    setup_logging()
     parser = _build_parser()
     if len(sys.argv) > 1:
         _run_command(parser, sys.argv[1:])

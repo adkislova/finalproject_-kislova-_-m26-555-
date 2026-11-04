@@ -18,3 +18,6 @@ Thumbs.db
 
 # Runtime session state
 data/session.json
+
+# Application logs
+logs/
