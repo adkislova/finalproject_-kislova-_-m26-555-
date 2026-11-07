@@ -4,6 +4,9 @@ from abc import ABC, abstractmethod
 
 from valutatrade_hub.core.exceptions import CurrencyNotFoundError
 
+MIN_CODE_LENGTH = 2
+MAX_CODE_LENGTH = 5
+
 
 class Currency(ABC):
     """Abstract base currency with a human-readable name and a ticker code."""
@@ -13,8 +16,10 @@ class Currency(ABC):
             raise ValueError("Название валюты не может быть пустым.")
         if not isinstance(code, str):
             raise TypeError("Код валюты должен быть строкой.")
-        if not 2 <= len(code) <= 5:
-            raise ValueError("Код валюты должен содержать от 2 до 5 символов.")
+        if not MIN_CODE_LENGTH <= len(code) <= MAX_CODE_LENGTH:
+            raise ValueError(
+                f"Код валюты должен содержать от {MIN_CODE_LENGTH} до {MAX_CODE_LENGTH} символов."
+            )
         if code != code.upper():
             raise ValueError("Код валюты должен быть в верхнем регистре.")
         if " " in code:

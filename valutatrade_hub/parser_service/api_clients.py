@@ -35,6 +35,8 @@ class BaseApiClient(ABC):
             raise ApiRequestError(f"сеть недоступна: {exc}") from None
         self._status_code = response.status_code
         self._etag = response.headers.get("ETag", "")
+        if response.status_code == 401:
+            raise ApiRequestError("неверный API-ключ (401)")
         if response.status_code == 429:
             raise ApiRequestError("превышен лимит запросов к источнику (429)")
         if response.status_code != 200:
