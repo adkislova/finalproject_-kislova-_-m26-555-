@@ -24,3 +24,6 @@ logs/
 
 # API keys
 .env
+
+# Editor backups
+*.json~

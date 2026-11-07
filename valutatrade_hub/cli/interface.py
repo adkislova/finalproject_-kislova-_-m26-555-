@@ -14,7 +14,10 @@ from valutatrade_hub.core.exceptions import (
     InsufficientFundsError,
 )
 from valutatrade_hub.logging_config import setup_logging
+from valutatrade_hub.parser_service.scheduler import run_scheduler
 from valutatrade_hub.parser_service.updater import RatesUpdater
+
+_PORTFOLIO_SEPARATOR = "-" * 33
 
 
 def main() -> None:
@@ -25,8 +28,8 @@ def main() -> None:
         _run_command(parser, sys.argv[1:])
         return
     print("ValutaTrade Hub — консольный валютный кошелёк")
-    print("Команды: register, login, logout, show-portfolio, show-rates, buy, sell, get-rate,")
-    print("         currencies, update-rates, help, exit")
+    print("Команды: register, login, deposit, logout, show-portfolio, show-rates, buy, sell,")
+    print("         get-rate, currencies, update-rates, schedule-rates, help, exit")
     while True:
         try:
             line = input("> ")
@@ -49,6 +52,11 @@ def _build_parser() -> argparse.ArgumentParser:
     register.add_argument("--username", required=True)
     register.add_argument("--password", required=True)
     register.set_defaults(func=_cmd_register)
+
+    dep = sub.add_parser("deposit", help="пополнить баланс кошелька")
+    dep.add_argument("--currency", default="USD")
+    dep.add_argument("--amount", required=True, type=float)
+    dep.set_defaults(func=_cmd_deposit)
 
     login = sub.add_parser("login", help="войти в систему")
     login.add_argument("--username", required=True)
@@ -92,6 +100,11 @@ def _build_parser() -> argparse.ArgumentParser:
     show_rates.add_argument("--top", type=int, default=None)
     show_rates.add_argument("--base", default=None)
     show_rates.set_defaults(func=_cmd_show_rates)
+
+    schedule = sub.add_parser("schedule-rates", help="автообновление курсов по таймеру")
+    schedule.add_argument("--interval", type=int, default=300)
+    schedule.add_argument("--source", default=None)
+    schedule.set_defaults(func=_cmd_schedule_rates)
     return parser
 
 
@@ -147,6 +160,7 @@ def _cmd_help(args: argparse.Namespace) -> None:
     print("Доступные команды:")
     print("  register --username <str> --password <str>   регистрация")
     print("  login --username <str> --password <str>      вход")
+    print("  deposit [--currency <str>] --amount <float>  пополнить баланс")
     print("  logout                                       выход из сессии")
     print("  show-portfolio [--base <str>]                портфель и балансы")
     print("  buy --currency <str> --amount <float>        купить валюту")
@@ -155,6 +169,7 @@ def _cmd_help(args: argparse.Namespace) -> None:
     print("  currencies                                   поддерживаемые валюты")
     print("  show-rates [--currency] [--top <int>] [--base <str>]   курсы из кеша")
     print("  update-rates [--source <str>]                обновить курсы из API")
+    print("  schedule-rates [--interval <int>] [--source]  автообновление по таймеру")
     print("  exit                                         выход")
 
 
@@ -167,7 +182,7 @@ def _cmd_show_portfolio(args: argparse.Namespace) -> None:
     for row in data["rows"]:
         balance = _fmt_balance(row["code"], row["balance"])
         print(f"- {row['code']}: {balance}  → {row['value']:,.2f} {data['base']}")
-    print("-" * 33)
+    print(_PORTFOLIO_SEPARATOR)
     print(f"ИТОГО: {data['total']:,.2f} {data['base']}")
 
 
@@ -182,6 +197,7 @@ def _cmd_buy(args: argparse.Namespace) -> None:
         f"- {data['currency']}: было {_fmt_balance(data['currency'], data['old_balance'])} "
         f"→ стало {_fmt_balance(data['currency'], data['new_balance'])}"
     )
+    print(f"- USD: списано {data['usd_amount']:,.2f} (остаток {data['usd_balance']:,.2f})")
     print(f"Оценочная стоимость покупки: {data['usd_amount']:,.2f} USD")
 
 
@@ -203,9 +219,11 @@ def _cmd_sell(args: argparse.Namespace) -> None:
 def _cmd_get_rate(args: argparse.Namespace) -> None:
     from_cur = args.from_currency.strip().upper()
     to_cur = args.to_currency.strip().upper()
-    rate, updated = usecases.get_rate(from_cur, to_cur)
+    rate, updated, fresh = usecases.get_rate(from_cur, to_cur)
     print(f"Курс {from_cur}→{to_cur}: {_fmt_rate(rate)} (обновлено: {updated:%Y-%m-%d %H:%M:%S})")
     print(f"Обратный курс {to_cur}→{from_cur}: {_fmt_rate(1 / rate)}")
+    if not fresh:
+        print("Кеш устарел: показан резервный курс. Выполните 'update-rates' для актуализации.")
 
 
 def _cmd_update_rates(args: argparse.Namespace) -> None:
@@ -267,6 +285,26 @@ def _cmd_show_rates(args: argparse.Namespace) -> None:
         table.add_row([pair, _fmt_rate(rate), updated])
     print(f"Курсы из кеша (обновлено: {data.get('last_refresh') or '—'}):")
     print(table)
+
+
+def _cmd_schedule_rates(args: argparse.Namespace) -> None:
+    if args.interval <= 0:
+        print("Значение --interval должно быть положительным числом.")
+        return
+    print(f"Планировщик запущен: обновление каждые {args.interval} сек. Ctrl+C — остановить.")
+    try:
+        run_scheduler(args.interval, args.source)
+    except KeyboardInterrupt:
+        print()
+        print("Планировщик остановлен.")
+
+
+def _cmd_deposit(args: argparse.Namespace) -> None:
+    data = usecases.deposit_currency(args.currency, args.amount)
+    print(
+        f"Баланс пополнен: +{_fmt_balance(data['currency'], data['amount'])} "
+        f"{data['currency']} (стало {_fmt_balance(data['currency'], data['new_balance'])})"
+    )
 
 
 def _fmt_balance(currency_code: str, value: float) -> str:

@@ -1,7 +1,7 @@
 [project]
 name = "valutatrade-hub"
 version = "0.1.0"
-description = "Add your description here"
+description = "ValutaTrade Hub — консольный валютный кошелёк с сервисом парсинга курсов"
 readme = "README.md"
 authors = [
     { name = "nastayirshenko", email = "nastayirshenko@gmail.com" }

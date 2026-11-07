@@ -116,7 +116,7 @@ def show_portfolio(base_currency: str | None = None) -> dict:
     rows = []
     total = 0.0
     for code, wallet in wallets.items():
-        rate, _ = get_rate(code, base)
+        rate, _, _ = get_rate(code, base)
         value = wallet.balance * rate
         rows.append({"code": code, "balance": wallet.balance, "value": round(value, 2)})
         total += value
@@ -129,9 +129,37 @@ def show_portfolio(base_currency: str | None = None) -> dict:
     }
 
 
+@log_action("DEPOSIT", verbose=True)
+def deposit_currency(currency_code: str, amount: float) -> dict:
+    """Top up a wallet balance for the logged-in user (wallet is created on demand)."""
+    user = _require_user()
+    currency = currency_code.strip().upper()
+    if not currency:
+        raise ValueError("Код валюты не может быть пустым.")
+    get_currency(currency)
+    if isinstance(amount, bool) or not isinstance(amount, (int, float)) or amount <= 0:
+        raise ValueError("'amount' должен быть положительным числом")
+    portfolio = _load_portfolio(user.user_id)
+    wallet = (
+        portfolio.get_wallet(currency)
+        if currency in portfolio.wallets
+        else portfolio.add_currency(currency)
+    )
+    old_balance = wallet.balance
+    wallet.deposit(amount)
+    _save_portfolio(portfolio)
+    return {
+        "username": user.username,
+        "currency": currency,
+        "amount": amount,
+        "old_balance": old_balance,
+        "new_balance": wallet.balance,
+    }
+
+
 @log_action("BUY", verbose=True)
 def buy_currency(currency_code: str, amount: float) -> dict:
-    """Buy amount of the currency for the logged-in user (wallet is created on demand)."""
+    """Buy amount of the currency for the logged-in user, debiting the USD wallet."""
     user = _require_user()
     currency = currency_code.strip().upper()
     if not currency:
@@ -146,9 +174,16 @@ def buy_currency(currency_code: str, amount: float) -> dict:
         else portfolio.add_currency(currency)
     )
     try:
-        rate, _ = get_rate(currency, "USD")
+        rate, _, _ = get_rate(currency, "USD")
     except RateUnavailableError:
         raise ValueError(f"Не удалось получить курс для {currency}→USD") from None
+    usd_wallet = (
+        portfolio.get_wallet("USD") if "USD" in portfolio.wallets else portfolio.add_currency("USD")
+    )
+    cost = round(amount * rate, 2)
+    if usd_wallet.balance < cost:
+        raise InsufficientFundsError(available=usd_wallet.balance, required=cost, code="USD")
+    usd_wallet.withdraw(cost)
     old_balance = wallet.balance
     wallet.deposit(amount)
     _save_portfolio(portfolio)
@@ -160,7 +195,8 @@ def buy_currency(currency_code: str, amount: float) -> dict:
         "new_balance": wallet.balance,
         "rate": rate,
         "base": "USD",
-        "usd_amount": round(amount * rate, 2),
+        "usd_amount": cost,
+        "usd_balance": usd_wallet.balance,
     }
 
 
@@ -184,7 +220,7 @@ def sell_currency(currency_code: str, amount: float) -> dict:
     if amount > wallet.balance:
         raise InsufficientFundsError(available=wallet.balance, required=amount, code=currency)
     try:
-        rate, _ = get_rate(currency, "USD")
+        rate, _, _ = get_rate(currency, "USD")
     except RateUnavailableError:
         raise ValueError(f"Не удалось получить курс для {currency}→USD") from None
     old_balance = wallet.balance
@@ -236,38 +272,38 @@ def _save_portfolio(portfolio: Portfolio) -> None:
     db.update("portfolios.json", [], replace_or_add)
 
 
-def get_rate(from_currency: str, to_currency: str) -> tuple[float, datetime]:
-    """Return the current from->to rate and its update time (cache first, then the stub)."""
+def get_rate(from_currency: str, to_currency: str) -> tuple[float, datetime, bool]:
+    """Return the from->to rate, its update time and whether the fresh cache was used."""
     from_cur = from_currency.strip().upper()
     to_cur = to_currency.strip().upper()
     if not from_cur or not to_cur:
         raise ValueError("Код валюты не может быть пустым.")
     if from_cur == to_cur:
-        return 1.0, datetime.now()
+        return 1.0, datetime.now(), True
     get_currency(from_cur)
     get_currency(to_cur)
     try:
-        usd_per_from, ts_from = _get_usd_rate(from_cur)
-        usd_per_to, ts_to = _get_usd_rate(to_cur)
+        usd_per_from, ts_from, fresh_from = _get_usd_rate(from_cur)
+        usd_per_to, ts_to, fresh_to = _get_usd_rate(to_cur)
     except ApiRequestError:
         raise RateUnavailableError(
             f"Курс {from_cur}→{to_cur} недоступен. Повторите попытку позже."
         ) from None
-    return usd_per_from / usd_per_to, max(ts_from, ts_to)
+    return usd_per_from / usd_per_to, max(ts_from, ts_to), fresh_from and fresh_to
 
 
-def _get_usd_rate(currency: str) -> tuple[float, datetime]:
-    """Return how many USD one unit of the currency costs, using cache or the stub."""
+def _get_usd_rate(currency: str) -> tuple[float, datetime, bool]:
+    """Return the USD rate, its update time and whether it came from fresh cache."""
     if currency == "USD":
-        return 1.0, datetime.min
+        return 1.0, datetime.min, True
     data = db.load("rates.json", {})
     pairs = data.get("pairs") or data
     entry = pairs.get(f"{currency}_USD")
     if entry and _is_fresh(entry):
-        return float(entry["rate"]), _parse_updated_at(entry["updated_at"])
+        return float(entry["rate"]), _parse_updated_at(entry["updated_at"]), True
     rate = _fetch_rate_stub(currency)
     _update_rate_cache(currency, rate)
-    return rate, datetime.now(UTC).replace(tzinfo=None)
+    return rate, datetime.now(UTC).replace(tzinfo=None), False
 
 
 def _fetch_rate_stub(currency: str) -> float:
